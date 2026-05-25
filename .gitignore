@@ -1,0 +1,9 @@
+.matlab_prefdir/
+.omx/
+.git/
+gitmeta/
+*.asv
+*.fig
+*.mat
+*.log
+*.tmp
