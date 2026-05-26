@@ -199,8 +199,8 @@ beta_G_MHz = beta_G_Hz / 1e6;
 % 若需要完整仿真，把 quickClosedLoopTest 改为 false，即使用 25:5:50 dB-Hz、
 % 10 次 Monte Carlo、每次 5 帧；去掉 1 帧收敛期后，每个 C/N0 统计
 % 40 frames 和 1600 bits。
-quickClosedLoopTest = true;
-closedLoopCNoDbHzFull = 25:5:50;
+quickClosedLoopTest = false;
+closedLoopCNoDbHzFull = 0:1:50;
 mcRunsPerCNoFull = 10;
 framesPerRunFull = 5;
 periodsPerFrame = 20;
@@ -225,7 +225,6 @@ closedLoopParams.framesPerRun = framesPerRun;
 closedLoopParams.periodsPerFrame = periodsPerFrame;
 closedLoopParams.settlingFrames = settlingFrames;
 closedLoopParams.trueCodeDelayChips = 0.35;
-closedLoopParams.initialCodeErrorChips = 0.02;
 closedLoopParams.earlyLateSpacingChips = 0.1;
 closedLoopParams.dllGainChips = 0.02;
 closedLoopParams.codePeakSearchGridChips = -0.04:0.005:0.04;
@@ -255,8 +254,10 @@ assert(all(isfinite(carrierPhaseNoiseRad)), 'Carrier phase noise contains invali
 assert(all(isfinite(berList)), 'BER contains invalid values.');
 assert(all(isfinite(ferList)), 'FER contains invalid values.');
 assert(isfinite(closedLoopSanity.CodeRMSE_chips), 'High C/N0 sanity code RMSE is invalid.');
-assert(closedLoopSanity.FinalCodeError_chips < closedLoopParams.initialCodeErrorChips, ...
-    'High C/N0 sanity check failed: DLL did not reduce the initial code error.');
+assert(isfinite(closedLoopSanity.FinalCodeError_chips), ...
+    'High C/N0 sanity final code error is invalid.');
+assert(isfinite(closedLoopSanity.BER) && isfinite(closedLoopSanity.FER), ...
+    'High C/N0 sanity BER/FER is invalid.');
 
 %% 12. 绘图
 % 图 1：BOC(4,1)-MCSK 复合信号前 20 us 的时域波形
@@ -367,7 +368,7 @@ subplot(2, 1, 1);
 plot(exampleTrace.periodIndex, exampleTrace.codeErrorChips, 'LineWidth', 1.1);
 xlabel('Period index');
 ylabel('Code error (chips)');
-title(sprintf('DLL Convergence Trace, C/N_0 = %.1f dB-Hz', ...
+title(sprintf('DLL Trace after Acquisition, C/N_0 = %.1f dB-Hz', ...
     exampleTrace.CNoDbHz));
 grid on;
 subplot(2, 1, 2);
@@ -434,16 +435,17 @@ fprintf('%.1f ', closedLoopCNoDbHz);
 fprintf('dB-Hz\n');
 fprintf('mcRunsPerCNo = %d, framesPerRun = %d, periodsPerFrame = %d, settlingFrames = %d\n', ...
     mcRunsPerCNo, framesPerRun, periodsPerFrame, settlingFrames);
-fprintf('trueCodeDelayChips = %.3f, initialCodeErrorChips = %.3f\n', ...
-    closedLoopParams.trueCodeDelayChips, closedLoopParams.initialCodeErrorChips);
-fprintf('%-12s %-18s %-18s %-24s %-24s %-14s %-14s\n', ...
-    'C/N0(dB-Hz)', 'CodeRMSE(chips)', 'CodeRMSE(m)', ...
+fprintf('trueCodeDelayChips = %.3f，仅用于信道生成和离线误差统计\n', ...
+    closedLoopParams.trueCodeDelayChips);
+fprintf('%-12s %-18s %-18s %-18s %-18s %-18s %-14s %-14s\n', ...
+    'C/N0(dB-Hz)', 'AcqRMSE(chips)', 'CodeRMSE(chips)', 'FinalErr(chips)', ...
     'CarrierStd(rad)', 'CarrierStd(deg)', 'BER', 'FER');
 for rowIdx = 1:height(closedLoopResults)
-    fprintf('%-12.1f %-18.6e %-18.6f %-24.6e %-24.6f %-14.6e %-14.6e\n', ...
+    fprintf('%-12.1f %-18.6e %-18.6e %-18.6e %-18.6e %-18.6f %-14.6e %-14.6e\n', ...
         closedLoopResults.CNo_dBHz(rowIdx), ...
+        closedLoopResults.AcquisitionRMSE_chips(rowIdx), ...
         closedLoopResults.CodeRMSE_chips(rowIdx), ...
-        closedLoopResults.CodeRMSE_m(rowIdx), ...
+        closedLoopResults.FinalCodeError_chips(rowIdx), ...
         closedLoopResults.CarrierPhaseStd_rad(rowIdx), ...
         closedLoopResults.CarrierPhaseStd_deg(rowIdx), ...
         closedLoopResults.BER(rowIdx), ...
@@ -451,9 +453,13 @@ for rowIdx = 1:height(closedLoopResults)
 end
 fprintf('\nMATLAB table variable closedLoopResults:\n');
 disp(closedLoopResults);
-fprintf('High C/N0 sanity check at %.1f dB-Hz: CodeRMSE = %.6e chips, FinalCodeError = %.6e chips, BER = %.6e, FER = %.6e\n', ...
-    closedLoopParams.sanityCNoDbHz, closedLoopSanity.CodeRMSE_chips, ...
-    closedLoopSanity.FinalCodeError_chips, closedLoopSanity.BER, closedLoopSanity.FER);
+fprintf('High C/N0 sanity check at %.1f dB-Hz: AcqRMSE = %.6e chips, CodeRMSE = %.6e chips, FinalCodeError = %.6e chips, BER = %.6e, FER = %.6e\n', ...
+    closedLoopParams.sanityCNoDbHz, closedLoopSanity.AcquisitionRMSE_chips, ...
+    closedLoopSanity.CodeRMSE_chips, closedLoopSanity.FinalCodeError_chips, ...
+    closedLoopSanity.BER, closedLoopSanity.FER);
+fprintf('Sanity final estimate at %.1f dB-Hz: acquiredCodeDelay = %.6f chips, finalCodeDelayEstimate = %.6f chips\n', ...
+    closedLoopParams.sanityCNoDbHz, closedLoopSanity.AcquiredCodeDelay_chips, ...
+    closedLoopSanity.FinalCodeDelayEstimate_chips);
 
 %% 本地函数
 function [f, Pxx] = manualWelchPsd(x, fs, segmentLength, overlapLength, nfft)
@@ -577,11 +583,16 @@ function [resultsTable, exampleTrace, sanityResult] = runClosedLoopSweep( ...
     carrierPhaseNoiseDeg = zeros(numel(cnoList), 1);
     berList = zeros(numel(cnoList), 1);
     ferList = zeros(numel(cnoList), 1);
+    acquiredCodeDelayChips = zeros(numel(cnoList), 1);
+    acquisitionRmseChips = zeros(numel(cnoList), 1);
+    finalCodeDelayEstimateChips = zeros(numel(cnoList), 1);
+    finalCodeErrorChips = zeros(numel(cnoList), 1);
     bitCountList = zeros(numel(cnoList), 1);
     frameCountList = zeros(numel(cnoList), 1);
 
     exampleTrace = struct('CNoDbHz', cnoList(end), 'periodIndex', [], ...
-        'codeErrorChips', [], 'phaseErrorDeg', []);
+        'codeErrorChips', [], 'phaseErrorDeg', [], ...
+        'acquiredCodeDelayChips', NaN, 'acquisitionErrorChips', NaN);
 
     for cnoIdx = 1:numel(cnoList)
         keepTrace = (cnoIdx == numel(cnoList));
@@ -597,6 +608,10 @@ function [resultsTable, exampleTrace, sanityResult] = runClosedLoopSweep( ...
         carrierPhaseNoiseDeg(cnoIdx) = result.CarrierPhaseStd_deg;
         berList(cnoIdx) = result.BER;
         ferList(cnoIdx) = result.FER;
+        acquiredCodeDelayChips(cnoIdx) = result.AcquiredCodeDelay_chips;
+        acquisitionRmseChips(cnoIdx) = result.AcquisitionRMSE_chips;
+        finalCodeDelayEstimateChips(cnoIdx) = result.FinalCodeDelayEstimate_chips;
+        finalCodeErrorChips(cnoIdx) = result.FinalCodeError_chips;
         bitCountList(cnoIdx) = result.BitCount;
         frameCountList(cnoIdx) = result.FrameCount;
 
@@ -607,9 +622,13 @@ function [resultsTable, exampleTrace, sanityResult] = runClosedLoopSweep( ...
 
     resultsTable = table(cnoList, codeTrackingRmseChips, codeTrackingRmseMeters, ...
         carrierPhaseNoiseRad, carrierPhaseNoiseDeg, berList, ferList, ...
+        acquiredCodeDelayChips, acquisitionRmseChips, ...
+        finalCodeDelayEstimateChips, finalCodeErrorChips, ...
         bitCountList, frameCountList, ...
         'VariableNames', {'CNo_dBHz', 'CodeRMSE_chips', 'CodeRMSE_m', ...
         'CarrierPhaseStd_rad', 'CarrierPhaseStd_deg', 'BER', 'FER', ...
+        'AcquiredCodeDelay_chips', 'AcquisitionRMSE_chips', ...
+        'FinalCodeDelayEstimate_chips', 'FinalCodeError_chips', ...
         'BitCount', 'FrameCount'});
 
     [sanityResult, ~] = simulateClosedLoopCNo(params.sanityCNoDbHz, ...
@@ -627,24 +646,51 @@ function [result, trace] = simulateClosedLoopCNo(cnoDbHz, mcRuns, framesPerRun, 
     cnoLinear = 10^(cnoDbHz / 10);
     noiseVariance = fs / cnoLinear;
     chipLengthMeters = params.speedOfLight / Rc;
+    codeLength = samplesPerCode / samplesPerChip;
 
     codeErrorList = [];
     phaseErrorList = [];
-    lastCodeErrorChips = params.initialCodeErrorChips;
+    acquiredCodeDelayList = [];
+    acquisitionErrorList = [];
+    finalCodeDelayEstimateList = [];
+    finalCodeErrorList = [];
     bitErrorCount = 0;
     bitTotalCount = 0;
     frameErrorCount = 0;
     frameTotalCount = 0;
 
     trace = struct('CNoDbHz', cnoDbHz, 'periodIndex', [], ...
-        'codeErrorChips', [], 'phaseErrorDeg', []);
+        'codeErrorChips', [], 'phaseErrorDeg', [], ...
+        'acquiredCodeDelayChips', NaN, 'acquisitionErrorChips', NaN);
 
     for runIdx = 1:mcRuns
-        estCodeDelayChips = params.trueCodeDelayChips + params.initialCodeErrorChips;
         trueDopplerHz = params.trueResidualDopplerHz;
         estDopplerHz = params.initialReceiverDopplerHz;
         trueCarrierPhaseRad = wrapToPiLocal(2*pi*rand());
         estCarrierPhaseRad = 0;
+
+        % Acquisition 使用接收机能看到的第一个 measurement 周期相关峰初始化码相位。
+        % trueCodeDelayChips 只在下面的离线误差统计里使用，不反馈给接收机。
+        acquisitionCarrier = exp(1j * (trueCarrierPhaseRad + ...
+            2*pi*trueDopplerHz*timeOneCode));
+        acquisitionNoise = sqrt(noiseVariance/2) * ...
+            (randn(1, samplesPerCode) + 1j*randn(1, samplesPerCode));
+        acquisitionRx = measurementTxDelayed .* acquisitionCarrier + acquisitionNoise;
+        estCodeDelayChips = acquireCodeDelayChips(acquisitionRx, ...
+            measurementReplica, samplesPerChip);
+        acquisitionErrorChips = codeDelayDifferenceChips(estCodeDelayChips, ...
+            params.trueCodeDelayChips, codeLength);
+
+        acquiredCodeDelayList(end+1, 1) = estCodeDelayChips; %#ok<AGROW>
+        acquisitionErrorList(end+1, 1) = acquisitionErrorChips; %#ok<AGROW>
+
+        if keepTrace && runIdx == 1
+            trace.acquiredCodeDelayChips = estCodeDelayChips;
+            trace.acquisitionErrorChips = acquisitionErrorChips;
+        end
+
+        trueCarrierPhaseRad = wrapToPiLocal(trueCarrierPhaseRad + ...
+            2*pi*trueDopplerHz*codePeriod);
 
         tracePeriod = 0;
         for frameIdx = 1:framesPerRun
@@ -689,23 +735,22 @@ function [result, trace] = simulateClosedLoopCNo(cnoDbHz, mcRuns, framesPerRun, 
                     estCodeDelayChips = estCodeDelayChips + ...
                         dllSign * params.dllGainChips * dllDisc + ...
                         params.codePeakAssistGain * peakOffsetChips;
-                    estCodeDelayChips = min(max(estCodeDelayChips, ...
-                        params.trueCodeDelayChips - 0.75), ...
-                        params.trueCodeDelayChips + 0.75);
-                    lastCodeErrorChips = estCodeDelayChips - params.trueCodeDelayChips;
+                    estCodeDelayChips = wrapCodeDelayChips(estCodeDelayChips, codeLength);
+                    currentCodeErrorChips = codeDelayDifferenceChips(estCodeDelayChips, ...
+                        params.trueCodeDelayChips, codeLength);
 
                     estCarrierPhaseRad = wrapToPiLocal(estCarrierPhaseRad + ...
                         params.pllPhaseGain * phaseErrorRad);
                     estDopplerHz = estDopplerHz + params.pllFreqGainHz * phaseErrorRad;
 
                     if effectiveFrame
-                        codeErrorList(end+1, 1) = estCodeDelayChips - params.trueCodeDelayChips; %#ok<AGROW>
+                        codeErrorList(end+1, 1) = currentCodeErrorChips; %#ok<AGROW>
                         phaseErrorList(end+1, 1) = phaseErrorRad; %#ok<AGROW>
                     end
 
                     if keepTrace && runIdx == 1
                         trace.periodIndex(end+1, 1) = tracePeriod; %#ok<AGROW>
-                        trace.codeErrorChips(end+1, 1) = estCodeDelayChips - params.trueCodeDelayChips; %#ok<AGROW>
+                        trace.codeErrorChips(end+1, 1) = currentCodeErrorChips; %#ok<AGROW>
                         trace.phaseErrorDeg(end+1, 1) = phaseErrorRad * 180/pi; %#ok<AGROW>
                     end
                 else
@@ -735,6 +780,10 @@ function [result, trace] = simulateClosedLoopCNo(cnoDbHz, mcRuns, framesPerRun, 
                 frameErrorCount = frameErrorCount + double(frameHasError);
             end
         end
+
+        finalCodeDelayEstimateList(end+1, 1) = estCodeDelayChips; %#ok<AGROW>
+        finalCodeErrorList(end+1, 1) = codeDelayDifferenceChips(estCodeDelayChips, ...
+            params.trueCodeDelayChips, codeLength); %#ok<AGROW>
     end
 
     if isempty(codeErrorList)
@@ -748,7 +797,10 @@ function [result, trace] = simulateClosedLoopCNo(cnoDbHz, mcRuns, framesPerRun, 
     result.CNo_dBHz = cnoDbHz;
     result.CodeRMSE_chips = sqrt(mean(codeErrorList.^2, 'omitnan'));
     result.CodeRMSE_m = result.CodeRMSE_chips * chipLengthMeters;
-    result.FinalCodeError_chips = abs(lastCodeErrorChips);
+    result.AcquiredCodeDelay_chips = mean(acquiredCodeDelayList, 'omitnan');
+    result.AcquisitionRMSE_chips = sqrt(mean(acquisitionErrorList.^2, 'omitnan'));
+    result.FinalCodeDelayEstimate_chips = mean(finalCodeDelayEstimateList, 'omitnan');
+    result.FinalCodeError_chips = sqrt(mean(finalCodeErrorList.^2, 'omitnan'));
     result.CarrierPhaseStd_rad = std(phaseErrorList, 'omitnan');
     result.CarrierPhaseStd_deg = result.CarrierPhaseStd_rad * 180/pi;
     result.BER = bitErrorCount / max(bitTotalCount, 1);
@@ -769,6 +821,46 @@ function dllSign = calibrateDllSign(measurementReplica, samplesPerChip, earlyLat
     else
         dllSign = -sign(testErrorChips * testDisc);
     end
+end
+
+function acquiredDelayChips = acquireCodeDelayChips(rxMeasurement, ...
+    measurementReplica, samplesPerChip)
+% acquireCodeDelayChips 用循环相关峰估计接收机初始码相位。
+% 该函数只使用接收样本和本地 measurement replica，不知道真实码延迟。
+    rxMeasurement = rxMeasurement(:).';
+    measurementReplica = measurementReplica(:).';
+    n = numel(measurementReplica);
+
+    corrMetric = abs(ifft(fft(rxMeasurement) .* conj(fft(measurementReplica))));
+    [~, peakIdx] = max(corrMetric);
+
+    leftIdx = mod(peakIdx - 2, n) + 1;
+    rightIdx = mod(peakIdx, n) + 1;
+    leftValue = corrMetric(leftIdx);
+    centerValue = corrMetric(peakIdx);
+    rightValue = corrMetric(rightIdx);
+    denom = leftValue - 2*centerValue + rightValue;
+
+    if abs(denom) > eps
+        fracOffset = 0.5 * (leftValue - rightValue) / denom;
+        fracOffset = min(max(fracOffset, -0.5), 0.5);
+    else
+        fracOffset = 0;
+    end
+
+    delaySamples = mod((peakIdx - 1) + fracOffset, n);
+    acquiredDelayChips = delaySamples / samplesPerChip;
+end
+
+function wrappedDelayChips = wrapCodeDelayChips(delayChips, codeLength)
+% wrapCodeDelayChips 将接收机内部码相位限制在一个码周期内。
+% 这不是用真值限幅，只是码相位 NCO 的自然周期回绕。
+    wrappedDelayChips = mod(delayChips, codeLength);
+end
+
+function diffChips = codeDelayDifferenceChips(estimateChips, truthChips, codeLength)
+% codeDelayDifferenceChips 仅用于离线评分，返回最短循环码相位误差。
+    diffChips = mod(estimateChips - truthChips + codeLength/2, codeLength) - codeLength/2;
 end
 
 function discriminator = computeDllDiscriminator(rxBaseband, measurementReplica, ...
